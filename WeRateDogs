@@ -1,0 +1,165 @@
+# Gather
+import pandas as pd
+import numpy as np
+import requests
+import tweepy
+import json
+
+#1. Uploading twitter_archive_enhanced.csv
+twitter = pd.read_csv('twitter-archive-enhanced.csv')
+twitter.head(50)
+
+# 2. Gathering data of image_predictions.tsv
+from pandas.compat import StringIO
+url = 'https://d17h27t6h515a5.cloudfront.net/topher/2017/August/599fd2ad_image-predictions/image-predictions.tsv'
+r = requests.get(url)
+image = pd.read_table(StringIO(r.text))
+image.head(20)
+
+#3. Reading tweet_json.txt line by line into pandas DataFrame
+df = [json.loads(line) for line in open('tweet-json.txt','r')]
+dataframe = pd.DataFrame(df)
+tweet = dataframe[['id_str','retweet_count','favorite_count']]
+tweet.head()
+
+# Assess
+#Quality Issues
+#1. The format of "tweet_id" and the format of "timestamp", in the "twitter"dataframe should be string and datetime; the format of "tweet_id" in the "image" dataframe should be "string".¶
+#2. The column name of "tweet" dataframe should be the same as the other two dataframes as "tweet_id".
+#3. Drop rows that are not dogs in the "image" dataframe.
+#4. Drop rows that have same images.
+#5. Only the original rating that have images are needed. So, "twitter" and "tweet" dataframes should be rebuild by selecting rows that "tweet_id" match the "image" dataframe.
+#6. Denominator cannot be 0.
+#7. Indicate the prediction of dog breeds.
+#8. Some of the words of the dog breed (in column "p1", "p2", "p3") in the "image" dataframe are lowercase but some others are capital.
+
+#Tidiness Issues
+#1. Calculate the "rating" in the "twitter" dataframe.
+#2. Merge the columns of "doggo","floofer","pupper" and "puppo" into one column with the name of "stage" in the "twitter" dataframe.
+#3. Build a new dataframe that contains columns of "tweet_id", "rating", "stage", "breed", "retweet_count", "favorite_count" for the further analyzing and visualizing.
+
+# Clean
+# Copy dataframes
+twitter_clean = twitter.copy()
+image_clean = image.copy()
+tweet_clean = tweet.copy()
+
+#Quality Issues
+#Define 1
+#1. Convert the format of "tweet_id" in the "twitter" dataframe into "string";
+#2. Convert the format of "timestamp" in the "twitter"dataframe into "datetime";
+#3. Convert the format of "tweet_id" in the "image" dataframe into "string".
+#Code 1
+twitter_clean.tweet_id = twitter_clean.tweet_id.astype(str)
+twitter_clean.timestamp = pd.to_datetime(twitter_clean.timestamp)
+image_clean.tweet_id = image_clean.tweet_id.astype(str)
+#Test 1
+twitter_clean.info()
+image_clean.info()
+
+#Define 2
+#Rename the column from "id_str" to "tweet_id" in the "tweet" dataframe.
+#Code 2
+tweet_clean.rename(columns={'id_str': 'tweet_id'}, inplace=True)
+#Test 2
+tweet_clean.head()
+
+#Define 3
+#Drop rows that are not dog images(p1_dog==False and p2_dog ==false and p3_dog==False) in the "image" dataframe.
+#Code 3
+image_clean = image_clean.drop(image_clean[(image_clean.p1_dog == False) & (image_clean.p2_dog == False) & (image_clean.p3_dog == False)].index)
+#Test 3
+image_clean.head(20)
+image_clean.info()
+
+#Define 4
+#Drop rows that have same images.
+#Code 4
+image_clean = image_clean.drop_duplicates(subset=['jpg_url'],keep=False)
+#Test 4
+image_clean.jpg_url.nunique()
+
+#Define 5
+#Compare with the "image" dataframe, delete rows of "twitter" and "tweet" dataframes that have no images.
+#Code 5
+lst = image_clean.tweet_id
+twitter_clean = twitter_clean[twitter_clean['tweet_id'].isin(lst)]
+tweet_clean = tweet_clean[tweet_clean['tweet_id'].isin(lst)]
+#Test 5
+twitter_clean.info()
+tweet_clean.info()
+
+#Define 6
+#Change the rating_denominator from "0" to "10" in the "twitter" dataframe
+#Code 6
+twitter_clean.loc[twitter_clean.rating_denominator==0] = 10
+#Test 6
+twitter_clean.rating_denominator.unique()
+
+#Define 7
+#Add a column that predict the breeds of dogs based on the images in the "image" dataframe.
+#Code 7
+cond1 = image_clean['p1_dog'] == True
+cond2 = image_clean['p2_dog'] == True
+cond3 = image_clean['p3_dog'] == True
+image_clean['breeds'] = np.where(cond1,image_clean.p1,np.where(cond2,image_clean.p2,np.where(cond3,image_clean.p3,'not a dog')))
+#Test 7
+image_clean.head(50)
+
+#Define 8
+#Change the first letter of dog breed in the "breeds" column from lowercase to capital letter.
+#Code 8
+image_clean.breeds = image_clean.breeds.str.capitalize()
+#Test 8
+image_clean.head(50)
+
+# Tidiness Issues
+#Define 1
+#Merge the columns of "rating_denominator" and "rating_numerator" into one with the name of "rating" in the "twitter" dataframe.
+#Code 1
+# Calculate the rating
+twitter_clean['rating']  = twitter_clean.rating_numerator / twitter_clean.rating_denominator
+# Drop columns of "rating_denominator" and "rating_numerator"
+twitter_clean = twitter_clean.drop(['rating_numerator','rating_denominator'],axis=1)
+#Test 1
+twitter_clean.head()
+
+#Define 2
+#Merge the columns of "doggo","floofer","pupper" and "puppo" into one column with the name of "stage" in the "twitter" dataframe.
+#For the rows that were not indicate the stage, set it to "none"; for the rows that had one stage, set it as the value of "stage"; for the rows that had more that one stages, set "multiple" as the value of "stage".
+#Code 2
+# Change "None" into null value in columns of "doggo","floofer","pupper" and "puppo".
+twitter_clean.doggo = twitter_clean.doggo.replace('None', np.nan)
+twitter_clean.floofer = twitter_clean.floofer.replace('None', np.nan)
+twitter_clean.pupper = twitter_clean.pupper.replace('None', np.nan)
+twitter_clean.puppo = twitter_clean.puppo.replace('None', np.nan)
+# Combine columns of "doggo","floofer","pupper" and "puppo" into one column names "stage".
+twitter_clean['stage'] = twitter_clean['doggo'].fillna('') + twitter_clean['floofer'].fillna('') + twitter_clean['pupper'].fillna('') + twitter_clean['puppo'].fillna('')
+twitter_clean.stage = twitter_clean.stage.replace('', np.nan)
+# Count length of string in "stage"
+twitter_clean['stage_length'] = twitter_clean.stage.map(str).apply(len)
+# Replace the values into "multiple" if there are more than one stage.
+twitter_clean['stage'] = np.where(twitter_clean.stage_length > 7, 'multiple', twitter_clean['stage'])
+# Delete columns of "doggo","floofer","pupper","puppo" and  "stage_length"
+twitter_clean = twitter_clean.drop(['doggo','floofer','pupper','puppo', 'stage_length'],axis=1)
+#Test 2
+twitter_clean.head(100)
+twitter_clean.info()
+twitter_clean.stage.unique()
+
+#Define 3
+#Build a new dataframe that contains columns of "tweet_id", "rating", "stage", "breeds", "retweet_count", "favorite_count" for the further analyzing and visualizing.
+#Code 3
+# Create three new dataframes that have specific columns.
+WeRateDogs = twitter_clean[['tweet_id','rating','stage']].copy()
+df2 = image_clean[['tweet_id','breeds']].copy()
+df3 = tweet_clean[['tweet_id','retweet_count','favorite_count']].copy()
+# Merge these three dataframes into one.
+WeRateDogs = WeRateDogs.merge(df2,on='tweet_id')
+WeRateDogs = WeRateDogs.merge(df3,on='tweet_id')
+#Test 3
+WeRateDogs.head()
+WeRateDogs.info()
+
+# Store
+WeRateDogs.to_csv('twitter_archive_master.csv',index = False)
